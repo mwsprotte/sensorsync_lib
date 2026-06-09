@@ -68,11 +68,12 @@ public:
    *
    * @param project Identificador do projeto.
    * @param device Identificador do dispositivo (sensor).
+   * @param dataNumber Número de dados a serem enviados.
    * @param desc Array de descrições dos sensores.
    * @param data Array de dados dos sensores.
    * @param topicAPI Tópico MQTT para onde os dados serão publicados.
    */
-  void sendData(int project, int device, String desc[], float data[], const char *topicAPI);
+  void sendData(int project, int device, int dataNumber, String desc[], float data[], const char *topicAPI);
 
   /**
    * @brief Configura o servidor MQTT.

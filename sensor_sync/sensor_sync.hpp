@@ -44,7 +44,7 @@ void MQTTConnection::reconnect() {
   }
 }
 
-void MQTTConnection::sendData(int project, int device, String desc[], float data[], const char* topicAPI) {
+void MQTTConnection::sendData(int project, int device, int dataNumber, String desc[], float data[], const char* topicAPI) {
   if (!client.connected()) {
     reconnect();
   }
@@ -52,10 +52,10 @@ void MQTTConnection::sendData(int project, int device, String desc[], float data
 
   String dataToSend = "[";
 
-  for (int i = 0; i < sizeof(data) / sizeof(data[0]); i++) {
+  for (int i = 0; i < dataNumber; i++) {
     dataToSend += "{'projectID': " + String(project) + ",'sensorIndex': " + String(device) + ",'dataIndex': " + String(i) + ",'sensorDescription': '" + desc[i] + "','data': " + String(data[i]) + "}";
 
-    if (i < sizeof(data) / sizeof(data[0]) - 1) {
+    if (i < dataNumber - 1) {
       dataToSend += ",";
     }
   }
