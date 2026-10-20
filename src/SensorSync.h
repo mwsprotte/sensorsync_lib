@@ -1,16 +1,18 @@
 /*
- * SensorSync - cliente Arduino (ESP8266/ESP32) para a plataforma IoT SensorSync.
+ * SensorSync - Arduino client (ESP8266/ESP32) for the SensorSync IoT platform.
+ * Cliente Arduino (ESP8266/ESP32) para a plataforma IoT SensorSync.
  * https://github.com/mwsprotte/sensorsync
+ * Author / Autor: Matheus Willian Sprotte (https://github.com/mwsprotte)
  *
- * Uso basico:
+ * Basic usage / Uso basico:
  *   SensorSync sensorSync;
  *   sensorSync.setToken("ss_...");
- *   sensorSync.useHTTP("10.0.0.104", 8080);      // ou useMQTT("10.0.0.104", 1883)
- *   sensorSync.begin("rede", "senha");
+ *   sensorSync.useHTTP("10.0.0.104", 8080);      // or/ou useMQTT("10.0.0.104", 1883)
+ *   sensorSync.begin("ssid", "password");
  *   ...
- *   sensorSync.loop();                           // no loop(), sempre
- *   sensorSync.setValue(0, temperatura);
- *   sensorSync.setValue(1, umidade);
+ *   sensorSync.loop();                           // every loop() / em todo loop()
+ *   sensorSync.setValue(0, temperature);
+ *   sensorSync.setValue(1, humidity);
  *   if (!sensorSync.send()) Serial.println(sensorSync.lastError());
  */
 #ifndef SENSORSYNC_H
@@ -25,13 +27,14 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #else
-#error "A biblioteca SensorSync suporta apenas ESP8266 e ESP32."
+#error "SensorSync supports only ESP8266 and ESP32 boards (suporta apenas ESP8266 e ESP32)."
 #endif
 
 #include <PubSubClient.h>
 
 #define SENSORSYNC_VERSION "1.0.0"
 
+// Maximum number of variables per send (the platform accepts up to 20 per project).
 // Quantidade maxima de variaveis por envio (a plataforma aceita ate 20 por projeto).
 #ifndef SENSORSYNC_MAX_VALUES
 #define SENSORSYNC_MAX_VALUES 20
@@ -43,55 +46,56 @@ public:
 
     SensorSync();
 
-    /** Token do dispositivo, gerado na tela "Dispositivos" do dashboard. */
+    /** Device token, generated in the dashboard "Devices" tab. / Token do dispositivo (aba "Dispositivos"). */
     void setToken(const char* token);
 
-    /** Envia por HTTP POST para http://host:port/api/ingest. */
+    /** Send via HTTP POST to http://host:port/api/ingest. / Envia por HTTP POST. */
     void useHTTP(const char* host, uint16_t port = 8080, const char* path = "/api/ingest");
 
-    /** Publica no broker MQTT (topico padrao "sensorsync"). */
+    /** Publish to the MQTT broker (default topic "sensorsync"). / Publica no broker MQTT. */
     void useMQTT(const char* host, uint16_t port = 1883, const char* topic = "sensorsync");
 
-    /** Usuario e senha do broker, se o broker exigir autenticacao. */
+    /** Broker user and password, if required. / Usuario e senha do broker, se exigidos. */
     void setMqttCredentials(const char* user, const char* password);
 
     /**
-     * Conecta ao Wi-Fi e espera ate o tempo de setWifiTimeout() (padrao 15 s).
-     * Retorna true se conectou. Se nao conectar, loop() continua tentando em segundo plano.
+     * Connects to Wi-Fi and waits up to setWifiTimeout() (default 15 s). Returns true if connected;
+     * otherwise loop() keeps retrying in the background.
+     * Conecta ao Wi-Fi e espera ate setWifiTimeout() (padrao 15 s); se nao conectar, loop() continua tentando.
      */
     bool begin(const char* ssid, const char* password);
 
-    /** Use quando o seu codigo ja cuida do Wi-Fi (ex.: rede corporativa WPA2-Enterprise). */
+    /** Use when your sketch manages Wi-Fi itself (static IP, WPA2-Enterprise...). / Quando o seu codigo ja cuida do Wi-Fi. */
     bool begin();
 
-    /** Chame em todo loop(): mantem Wi-Fi e MQTT conectados sem bloquear. */
+    /** Call on every loop(): keeps Wi-Fi and MQTT connected. / Chame em todo loop(). */
     void loop();
 
-    /** Define o valor da variavel 'index' (0 = primeira variavel do projeto). NaN = sem leitura. */
+    /** Sets variable 'index' (0 = first project variable); NAN = no reading. / Define a variavel 'index'; NAN = sem leitura. */
     bool setValue(uint8_t index, float value);
 
-    /** Descarta os valores definidos e ainda nao enviados. */
+    /** Discards values not sent yet. / Descarta os valores ainda nao enviados. */
     void clear();
 
-    /** Envia os valores definidos com setValue(). Em caso de sucesso, os valores sao limpos. */
+    /** Sends the values set with setValue(); clears them on success. / Envia e limpa os valores em caso de sucesso. */
     bool send();
 
-    /** Wi-Fi conectado e, no modo MQTT, broker conectado. */
+    /** Wi-Fi connected (and broker, in MQTT mode). / Wi-Fi conectado (e broker, no modo MQTT). */
     bool isConnected();
 
-    /** Descricao do ultimo erro (texto vazio se o ultimo envio deu certo). */
+    /** Last error message, empty if the last send succeeded (messages in Portuguese). / Ultimo erro. */
     const char* lastError() const { return _error; }
 
-    /** Status HTTP do ultimo envio (0 se nao houve resposta ou se o modo for MQTT). */
+    /** HTTP status of the last send (0 = no response or MQTT). / Status HTTP do ultimo envio. */
     int lastHttpStatus() const { return _httpStatus; }
 
-    /** Casas decimais enviadas (padrao 4). */
+    /** Decimal places sent (default 4). / Casas decimais enviadas (padrao 4). */
     void setDecimals(uint8_t decimals) { _decimals = decimals > 7 ? 7 : decimals; }
 
-    /** Tempo maximo que begin(ssid, senha) espera pelo Wi-Fi, em ms (padrao 15000). */
+    /** Max time begin(ssid, password) waits for Wi-Fi, in ms (default 15000). / Espera maxima do Wi-Fi. */
     void setWifiTimeout(uint32_t ms) { _wifiTimeout = ms; }
 
-    /** Mensagens de diagnostico (ex.: sensorSync.setDebug(Serial)). */
+    /** Diagnostic messages, e.g. sensorSync.setDebug(Serial). / Mensagens de diagnostico. */
     void setDebug(Stream& out) { _debug = &out; }
 
 private:
