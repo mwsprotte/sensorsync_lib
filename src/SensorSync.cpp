@@ -45,7 +45,7 @@ SensorSync::SensorSync()
     : _protocol(NONE), _port(0), _httpStatus(0), _decimals(4), _wifiTimeout(15000), _manageWifi(false),
       _lastWifiAttempt(0), _lastMqttAttempt(0), _count(0), _mqtt(_mqttNet), _reuse(true), _debug(nullptr),
       _secure(nullptr), _trust(nullptr), _ntpStarted(false), _mflnChecked(false), _tlsPrepare(nullptr),
-      _tlsError(nullptr) {
+      _tlsError(nullptr), _bench(false), _seq(0), _lastSendUs(0), _lastConnectUs(0), _ntpStart(nullptr) {
     _host[0] = _path[0] = _token[0] = _mqttUser[0] = _mqttPass[0] = _clientId[0] = _error[0] = 0;
     _ssid[0] = _wifiPass[0] = 0;
     clear();
@@ -99,13 +99,40 @@ void SensorSync::useTLS(const char* caPem) {
     log("TLS ligado");
 }
 
-bool SensorSync::tlsPrepareImpl(SensorSync& self) {
-    SecureClient* c = static_cast<SecureClient*>(self._secure);
-    if (!self._ntpStarted) {
-        // Hora certa e opcional (ver buildEpoch): tenta o proprio servidor e depois a internet
+void SensorSync::ntpStartImpl(SensorSync& self) {
+    if (!self._ntpStarted && self._host[0]) {
+        // Tenta o proprio servidor SensorSync (chrony) e depois a internet
         configTime(0, 0, self._host, "pool.ntp.org");
         self._ntpStarted = true;
+        self.log("SNTP iniciado");
     }
+}
+
+void SensorSync::enableBenchmark(bool on) {
+    _bench = on;
+    if (on) {
+        _ntpStart = &SensorSync::ntpStartImpl;
+        if (WiFi.status() == WL_CONNECTED) {
+            _ntpStart(*this);
+        }
+    }
+}
+
+bool SensorSync::clockSynced() { return time(nullptr) > 1600000000; }
+
+uint64_t SensorSync::epochMillis() {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    if (tv.tv_sec < 1600000000) {
+        return 0;
+    }
+    return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)(tv.tv_usec / 1000);
+}
+
+bool SensorSync::tlsPrepareImpl(SensorSync& self) {
+    SecureClient* c = static_cast<SecureClient*>(self._secure);
+    // Hora certa e opcional para o TLS (ver buildEpoch)
+    ntpStartImpl(self);
 #if defined(ESP8266)
     // O BearSSL confere as datas do certificado contra esta hora
     time_t now = time(nullptr);
@@ -217,6 +244,9 @@ void SensorSync::loop() {
         }
         return;
     }
+    if (_ntpStart) {
+        _ntpStart(*this);
+    }
     if (_protocol == MQTT) {
         if (!_mqtt.connected()) {
             if (millis() - _lastMqttAttempt > 5000UL) {
@@ -238,7 +268,9 @@ bool SensorSync::connectMqtt() {
         _mqtt.setSocketTimeout(10);  // o handshake TLS pode levar alguns segundos no ESP8266
         _tlsPrepare(*this);
     }
+    uint32_t t0 = micros();
     bool ok = _mqttUser[0] ? _mqtt.connect(_clientId, _mqttUser, _mqttPass) : _mqtt.connect(_clientId);
+    _lastConnectUs = micros() - t0;
     if (ok) {
         log("Broker MQTT conectado");
     } else {
@@ -304,12 +336,47 @@ size_t SensorSync::buildJson(char* out, size_t size, bool includeToken) {
         if (w < 0 || (size_t)w >= size - n) return 0;
         n += (size_t)w;
     }
-    w = snprintf(out + n, size - n, "]}");
+    w = snprintf(out + n, size - n, "]");
+    if (w < 0 || (size_t)w >= size - n) return 0;
+    n += (size_t)w;
+    if (_bench) {
+        // "seq" e "ts" (epoch ms, so com relogio sincronizado); uint64 escrito a mao (printf %llu nao e garantido)
+        char ts[24] = "";
+        uint64_t ms = epochMillis();
+        if (ms) {
+            char tmp[21];
+            int i = 0;
+            while (ms && i < 20) {
+                tmp[i++] = (char)('0' + (ms % 10));
+                ms /= 10;
+            }
+            int j = 0;
+            ts[j++] = ',';
+            const char* key = "\"ts\":";
+            while (*key) ts[j++] = *key++;
+            while (i) ts[j++] = tmp[--i];
+            ts[j] = 0;
+        }
+        w = snprintf(out + n, size - n, ",\"seq\":%lu%s", (unsigned long)_seq, ts);
+        if (w < 0 || (size_t)w >= size - n) return 0;
+        n += (size_t)w;
+    }
+    w = snprintf(out + n, size - n, "}");
     if (w < 0 || (size_t)w >= size - n) return 0;
     return n + (size_t)w;
 }
 
 bool SensorSync::send() {
+    uint32_t t0 = micros();
+    if (_bench) {
+        _seq++;  // conta toda tentativa: um seq que nao chega ao servidor e uma perda
+    }
+    bool ok = sendInternal();
+    _lastSendUs = micros() - t0;
+    return ok;
+}
+
+bool SensorSync::sendInternal() {
     _httpStatus = 0;
     if (_protocol == NONE) {
         setError("Chame useHTTP() ou useMQTT() antes de enviar");

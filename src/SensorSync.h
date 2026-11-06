@@ -34,8 +34,9 @@
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <time.h>
+#include <sys/time.h>
 
-#define SENSORSYNC_VERSION "1.1.0"
+#define SENSORSYNC_VERSION "1.2.0"
 
 // Maximum number of variables per send (the platform accepts up to 20 per project).
 // Quantidade maxima de variaveis por envio (a plataforma aceita ate 20 por projeto).
@@ -118,11 +119,34 @@ public:
     /** Diagnostic messages, e.g. sensorSync.setDebug(Serial). / Mensagens de diagnostico. */
     void setDebug(Stream& out) { _debug = &out; }
 
+    /**
+     * Experiments: every message also carries "seq" (1, 2, 3...) and, once the clock is synced by SNTP
+     * (the server first, then pool.ntp.org), "ts" (send time, epoch ms), and send() is timed.
+     * The server logs both (SENSORSYNC_METRICS=true) to measure latency and loss. See examples/Benchmark.
+     * Experimentos: cada mensagem leva "seq" e "ts" e cada send() e cronometrado.
+     */
+    void enableBenchmark(bool on = true);
+
+    /** Sequence number of the last send() (benchmark mode). / Numero de sequencia do ultimo send(). */
+    uint32_t sequence() const { return _seq; }
+
+    /** Duration of the last send() in microseconds. / Duracao do ultimo send() em microssegundos. */
+    uint32_t lastSendMicros() const { return _lastSendUs; }
+
+    /** Duration of the last broker connection (MQTT, includes the TLS handshake). / Duracao da ultima conexao ao broker. */
+    uint32_t lastConnectMicros() const { return _lastConnectUs; }
+
+    /** Clock synced (SNTP). / Relogio sincronizado. */
+    static bool clockSynced();
+
+    /** Current time in epoch ms (0 if the clock is not synced). / Hora atual em ms (0 sem sincronia). */
+    static uint64_t epochMillis();
+
 private:
     static const size_t HOST_LEN = 64;
     static const size_t TOKEN_LEN = 64;
     static const size_t PATH_LEN = 48;
-    static const size_t JSON_LEN = 96 + TOKEN_LEN + SENSORSYNC_MAX_VALUES * 20;
+    static const size_t JSON_LEN = 96 + TOKEN_LEN + SENSORSYNC_MAX_VALUES * 20 + 48;
 
     Protocol _protocol;
     char _host[HOST_LEN];
@@ -165,7 +189,16 @@ private:
     static void tlsErrorImpl(SensorSync& self, char* out, size_t size);
     void connectionError(const char* what);
 
+    // Benchmark mode
+    bool _bench;
+    uint32_t _seq;
+    uint32_t _lastSendUs;
+    uint32_t _lastConnectUs;
+    void (*_ntpStart)(SensorSync& self);
+    static void ntpStartImpl(SensorSync& self);
+
     size_t buildJson(char* out, size_t size, bool includeToken);
+    bool sendInternal();
     bool sendHttp(const char* json, size_t len);
     bool sendMqtt(const char* json, size_t len);
     bool connectMqtt();

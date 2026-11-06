@@ -60,6 +60,8 @@ The platform generates this sketch already filled in (server, token and variable
 | `setMqttCredentials(user, password)` | If the broker requires login. |
 | `useTLS(caPem)` | Encrypts the connection and only accepts a server signed by this CA (see TLS below). |
 | `setReuseConnection(bool)` | Keeps the HTTP(S) connection open between sends (default `true`). |
+| `enableBenchmark()` | Experiments: adds `"seq"` and `"ts"` (SNTP time, epoch ms) to each message and times `send()` (example `Benchmark`). |
+| `sequence()` / `lastSendMicros()` / `lastConnectMicros()` | Benchmark data of the last send / broker connection. |
 | `begin(ssid, password)` | Connects Wi-Fi (waits up to 15 s, then keeps retrying in `loop()`). |
 | `begin()` | When your sketch already connected Wi-Fi (static IP, enterprise network…). |
 | `loop()` | Call on every `loop()`. |
@@ -161,6 +163,8 @@ A plataforma gera esse código já preenchido (servidor, token e variáveis) ao 
 | `useMQTT(host, porta = 1883, tópico = "sensorsync")` | Envio por MQTT. |
 | `useTLS(caPem)` | Criptografa a conexão e só aceita um servidor assinado por esta CA (ver TLS abaixo). |
 | `setReuseConnection(bool)` | Mantém a conexão HTTP(S) aberta entre envios (padrão `true`). |
+| `enableBenchmark()` | Experimentos: cada mensagem leva `"seq"` e `"ts"` (hora do SNTP, epoch ms) e o `send()` é cronometrado (exemplo `Benchmark`). |
+| `sequence()` / `lastSendMicros()` / `lastConnectMicros()` | Dados do último envio / da última conexão ao broker. |
 | `setMqttCredentials(usuario, senha)` | Se o broker exigir login. |
 | `begin(ssid, senha)` | Conecta o Wi-Fi (espera até 15 s; depois continua tentando em `loop()`). |
 | `begin()` | Quando o seu código já conectou o Wi-Fi (IP fixo, rede corporativa…). |

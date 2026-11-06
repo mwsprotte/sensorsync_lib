@@ -17,3 +17,9 @@ SENSORSYNC_MAX_VALUES	LITERAL1
 useTLS	KEYWORD2
 tlsEnabled	KEYWORD2
 setReuseConnection	KEYWORD2
+enableBenchmark	KEYWORD2
+sequence	KEYWORD2
+lastSendMicros	KEYWORD2
+lastConnectMicros	KEYWORD2
+clockSynced	KEYWORD2
+epochMillis	KEYWORD2
