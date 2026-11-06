@@ -14,3 +14,6 @@ isConnected	KEYWORD2
 setDecimals	KEYWORD2
 setWifiTimeout	KEYWORD2
 SENSORSYNC_MAX_VALUES	LITERAL1
+useTLS	KEYWORD2
+tlsEnabled	KEYWORD2
+setReuseConnection	KEYWORD2

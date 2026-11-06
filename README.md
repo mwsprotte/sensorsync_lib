@@ -58,6 +58,8 @@ The platform generates this sketch already filled in (server, token and variable
 | `useHTTP(host, port = 8080, path = "/api/ingest")` | Send via HTTP POST. |
 | `useMQTT(host, port = 1883, topic = "sensorsync")` | Send via MQTT. |
 | `setMqttCredentials(user, password)` | If the broker requires login. |
+| `useTLS(caPem)` | Encrypts the connection and only accepts a server signed by this CA (see TLS below). |
+| `setReuseConnection(bool)` | Keeps the HTTP(S) connection open between sends (default `true`). |
 | `begin(ssid, password)` | Connects Wi-Fi (waits up to 15 s, then keeps retrying in `loop()`). |
 | `begin()` | When your sketch already connected Wi-Fi (static IP, enterprise network…). |
 | `loop()` | Call on every `loop()`. |
@@ -79,6 +81,20 @@ Up to 20 variables per send (`#define SENSORSYNC_MAX_VALUES` before the `#includ
 The array position is the variable index; `null` means "no reading". The server identifies project and
 device from the token, so a board cannot write to another project. The MQTT client ID is
 `sensorsync-<MAC>`, unique per board.
+
+### TLS
+
+When the server runs with the `tls` profile, the generated code already includes the server CA and calls
+`useTLS(CA_CERT)`; HTTPS uses port 8443 and MQTT over TLS port 8883 (example `TLS_Basico`).
+
+- The board validates the server certificate against that CA (no `setInsecure()`), so a third machine on
+  the network can neither read the token nor impersonate the server.
+- The server address in the sketch must be one of the names/IPs in the server certificate (the server
+  adds its own IPs and `SENSORSYNC_PUBLIC_HOST` automatically).
+- Boards have no reliable clock: certificate dates are checked against the SNTP time when available,
+  otherwise against the firmware build date.
+- ESP8266: if the broker accepts MFLN, TLS buffers drop to 512 B (about 20 KB less RAM).
+- Sketches that never call `useTLS()` do not link the TLS code (no flash cost).
 
 ### Migrating from 0.x (`sensor_sync/` folder)
 
@@ -143,6 +159,8 @@ A plataforma gera esse código já preenchido (servidor, token e variáveis) ao 
 | `setToken(token)` | Token do dispositivo (`ss_...`). |
 | `useHTTP(host, porta = 8080, caminho = "/api/ingest")` | Envio por HTTP POST. |
 | `useMQTT(host, porta = 1883, tópico = "sensorsync")` | Envio por MQTT. |
+| `useTLS(caPem)` | Criptografa a conexão e só aceita um servidor assinado por esta CA (ver TLS abaixo). |
+| `setReuseConnection(bool)` | Mantém a conexão HTTP(S) aberta entre envios (padrão `true`). |
 | `setMqttCredentials(usuario, senha)` | Se o broker exigir login. |
 | `begin(ssid, senha)` | Conecta o Wi-Fi (espera até 15 s; depois continua tentando em `loop()`). |
 | `begin()` | Quando o seu código já conectou o Wi-Fi (IP fixo, rede corporativa…). |
@@ -165,6 +183,20 @@ Até 20 variáveis por envio (`#define SENSORSYNC_MAX_VALUES` antes do `#include
 A posição no vetor é o índice da variável; `null` significa "sem leitura". O servidor descobre projeto e
 dispositivo pelo token, então uma placa não consegue gravar em outro projeto. O client ID MQTT é
 `sensorsync-<MAC>`, único por placa.
+
+### TLS
+
+Com o servidor no perfil `tls`, o código gerado já vem com a CA do servidor e chama `useTLS(CA_CERT)`;
+HTTPS usa a porta 8443 e MQTT com TLS a 8883 (exemplo `TLS_Basico`).
+
+- A placa confere o certificado do servidor contra essa CA (sem `setInsecure()`): outra máquina na rede
+  não consegue ler o token nem se passar pelo servidor.
+- O endereço do servidor no sketch precisa ser um dos nomes/IPs do certificado (o servidor inclui os
+  próprios IPs e o `SENSORSYNC_PUBLIC_HOST` automaticamente).
+- As placas não têm relógio confiável: as datas do certificado são conferidas com a hora do SNTP quando
+  disponível; senão, com a data de compilação do firmware.
+- ESP8266: se o broker aceitar MFLN, os buffers TLS caem para 512 B (cerca de 20 KB a menos de RAM).
+- Sketches que não chamam `useTLS()` não incluem o código de TLS (sem custo de flash).
 
 ### Migrando da versão 0.x (pasta `sensor_sync/`)
 

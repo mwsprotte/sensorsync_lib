@@ -4,9 +4,48 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(ESP8266)
+typedef BearSSL::WiFiClientSecure SecureClient;
+#else
+typedef WiFiClientSecure SecureClient;
+#endif
+
+#if defined(ESP8266)
+namespace {
+
+// ESP8266 (BearSSL) checks certificate dates; the ESP32 core is built without that check
+// (CONFIG_MBEDTLS_HAVE_TIME_DATE off), so this is only needed here.
+// Moment the library was compiled (UTC-ish; the build machine's local time). Boards without a valid
+// clock use it as "now" to check certificate dates. Because the server certificate is valid from the
+// creation of the CA (which happens before any code is generated) for 20 years, a firmware built
+// afterwards always falls inside the validity window. The 2-day margin absorbs the time zone.
+time_t buildEpoch() {
+    static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    const char* d = __DATE__;  // "Nov  6 2026"
+    const char* t = __TIME__;  // "12:00:00"
+    char mon[4] = {d[0], d[1], d[2], 0};
+    const char* found = strstr(months, mon);
+    long m = found ? (found - months) / 3 + 1 : 1;
+    long day = atol(d + 4);
+    long y = atol(d + 7);
+    // days_from_civil (H. Hinnant)
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    long yoe = y - era * 400;
+    long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    long days = era * 146097 + doe - 719468;
+    return (time_t)days * 86400 + atol(t) * 3600 + atol(t + 3) * 60 + atol(t + 6) + 2 * 86400;
+}
+
+}  // namespace
+#endif
+
 SensorSync::SensorSync()
     : _protocol(NONE), _port(0), _httpStatus(0), _decimals(4), _wifiTimeout(15000), _manageWifi(false),
-      _lastWifiAttempt(0), _lastMqttAttempt(0), _count(0), _mqtt(_mqttNet), _debug(nullptr) {
+      _lastWifiAttempt(0), _lastMqttAttempt(0), _count(0), _mqtt(_mqttNet), _reuse(true), _debug(nullptr),
+      _secure(nullptr), _trust(nullptr), _ntpStarted(false), _mflnChecked(false), _tlsPrepare(nullptr),
+      _tlsError(nullptr) {
     _host[0] = _path[0] = _token[0] = _mqttUser[0] = _mqttPass[0] = _clientId[0] = _error[0] = 0;
     _ssid[0] = _wifiPass[0] = 0;
     clear();
@@ -39,6 +78,79 @@ void SensorSync::useMQTT(const char* host, uint16_t port, const char* topic) {
     _mqtt.setBufferSize(JSON_LEN + sizeof(_path) + 16);
     _mqtt.setSocketTimeout(3);
     _mqtt.setKeepAlive(30);
+}
+
+void SensorSync::useTLS(const char* caPem) {
+    if (_secure != nullptr || caPem == nullptr) {
+        return;
+    }
+    SecureClient* c = new SecureClient();
+#if defined(ESP8266)
+    BearSSL::X509List* trust = new BearSSL::X509List(caPem);
+    c->setTrustAnchors(trust);
+    _trust = trust;
+#else
+    c->setCACert(caPem);
+    c->setHandshakeTimeout(15);
+#endif
+    _secure = c;
+    _tlsPrepare = &SensorSync::tlsPrepareImpl;
+    _tlsError = &SensorSync::tlsErrorImpl;
+    log("TLS ligado");
+}
+
+bool SensorSync::tlsPrepareImpl(SensorSync& self) {
+    SecureClient* c = static_cast<SecureClient*>(self._secure);
+    if (!self._ntpStarted) {
+        // Hora certa e opcional (ver buildEpoch): tenta o proprio servidor e depois a internet
+        configTime(0, 0, self._host, "pool.ntp.org");
+        self._ntpStarted = true;
+    }
+#if defined(ESP8266)
+    // O BearSSL confere as datas do certificado contra esta hora
+    time_t now = time(nullptr);
+    time_t minTime = buildEpoch();
+    c->setX509Time(now > minTime ? now : minTime);
+    if (!self._mflnChecked) {
+        // Buffers de 512 B economizam ~20 KB de RAM, mas so funcionam se o servidor aceitar MFLN
+        self._mflnChecked = true;
+        if (SecureClient::probeMaxFragmentLength(self._host, self._port, 512)) {
+            c->setBufferSizes(512, 512);
+            self.log("TLS: servidor aceita fragmentos de 512 B (buffers reduzidos)");
+        }
+    }
+#else
+    (void)c;
+#endif
+    return true;
+}
+
+void SensorSync::tlsErrorImpl(SensorSync& self, char* out, size_t size) {
+    SecureClient* c = static_cast<SecureClient*>(self._secure);
+    out[0] = 0;
+#if defined(ESP8266)
+    c->getLastSSLError(out, size);
+#else
+    // -1 ("Generic error") = a conexao TCP nem abriu: nao e problema de TLS
+    if (c->lastError(out, size) == -1) {
+        out[0] = 0;
+    }
+#endif
+}
+
+void SensorSync::connectionError(const char* what) {
+    char msg[sizeof(_error)];
+    char detail[48] = {0};
+    if (_tlsError) {
+        _tlsError(*this, detail, sizeof(detail));
+    }
+    if (detail[0]) {
+        snprintf(msg, sizeof(msg), "%s: TLS %s", what, detail);
+    } else {
+        snprintf(msg, sizeof(msg), "%s", what);
+    }
+    setError(msg);
+    log(msg);
 }
 
 void SensorSync::setMqttCredentials(const char* user, const char* password) {
@@ -121,14 +233,22 @@ bool SensorSync::connectMqtt() {
     if (_clientId[0] == 0) {
         makeClientId();
     }
+    if (_secure) {
+        _mqtt.setClient(*_secure);
+        _mqtt.setSocketTimeout(10);  // o handshake TLS pode levar alguns segundos no ESP8266
+        _tlsPrepare(*this);
+    }
     bool ok = _mqttUser[0] ? _mqtt.connect(_clientId, _mqttUser, _mqttPass) : _mqtt.connect(_clientId);
     if (ok) {
         log("Broker MQTT conectado");
     } else {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Falha ao conectar no broker MQTT (estado %d)", _mqtt.state());
-        setError(msg);
-        log(msg);
+        char msg[48];
+        if (_mqtt.state() == MQTT_CONNECT_FAILED) {
+            snprintf(msg, sizeof(msg), "Broker inacessivel (desligado ou firewall?)");
+        } else {
+            snprintf(msg, sizeof(msg), "Falha no broker MQTT (estado %d)", _mqtt.state());
+        }
+        connectionError(msg);
     }
     return ok;
 }
@@ -231,29 +351,44 @@ bool SensorSync::send() {
 
 bool SensorSync::sendHttp(const char* json, size_t len) {
     char url[HOST_LEN + PATH_LEN + 24];
-    snprintf(url, sizeof(url), "http://%s:%u%s", _host, (unsigned)_port, _path);
+    snprintf(url, sizeof(url), "%s://%s:%u%s", _secure ? "https" : "http", _host, (unsigned)_port, _path);
     char auth[TOKEN_LEN + 8];
     snprintf(auth, sizeof(auth), "Bearer %s", _token);
 
-    WiFiClient net;
-    HTTPClient http;
-    http.setTimeout(5000);
-    if (!http.begin(net, url)) {
-        setError("URL invalida");
-        return false;
+    WiFiClient& net = _secure ? *_secure : _httpNet;
+    if (_secure) {
+        _tlsPrepare(*this);
     }
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("Authorization", auth);
-    _httpStatus = http.POST((uint8_t*)json, len);
-    http.end();
+    // Com reuso, a conexao pode ter sido fechada pelo servidor desde o ultimo envio: tenta mais uma vez
+    for (uint8_t attempt = 0; attempt < 2; attempt++) {
+        _http.setReuse(_reuse);
+        _http.setTimeout(5000);
+        if (!_http.begin(net, url)) {
+            setError("URL invalida");
+            return false;
+        }
+        _http.addHeader("Content-Type", "application/json");
+        _http.addHeader("Authorization", auth);
+        _httpStatus = _http.POST((uint8_t*)json, len);
+        _http.end();
+        if (_httpStatus > 0 || !_reuse) {
+            break;
+        }
+        net.stop();
+    }
+    if (!_reuse) {
+        net.stop();
+    }
 
     if (_httpStatus == 200) {
         return true;
     }
     if (_httpStatus == 401) {
         setError("Token recusado pelo servidor (401)");
+    } else if (_httpStatus == 301 || _httpStatus == 308) {
+        setError("Servidor pede HTTPS: gere o codigo de novo");
     } else if (_httpStatus < 0) {
-        setError("Servidor inacessivel");
+        connectionError("Servidor inacessivel (desligado ou firewall?)");
     } else {
         char msg[48];
         snprintf(msg, sizeof(msg), "Servidor respondeu HTTP %d", _httpStatus);

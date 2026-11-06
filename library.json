@@ -1,8 +1,8 @@
 {
   "name": "SensorSync",
-  "version": "1.0.0",
-  "description": "Send sensor readings from ESP8266/ESP32 boards to the self-hosted SensorSync IoT platform over HTTP or MQTT.",
-  "keywords": "iot, sensors, mqtt, http, esp8266, esp32, dashboard",
+  "version": "1.1.0",
+  "description": "Send sensor readings from ESP8266/ESP32 boards to the self-hosted SensorSync IoT platform over HTTP or MQTT, with optional TLS.",
+  "keywords": "iot, sensors, mqtt, http, tls, esp8266, esp32, dashboard",
   "repository": { "type": "git", "url": "https://github.com/mwsprotte/sensorsync_lib.git" },
   "authors": [{ "name": "Matheus Willian Sprotte", "email": "msprotte@outlook.com", "url": "https://github.com/mwsprotte", "maintainer": true }],
   "frameworks": "arduino",

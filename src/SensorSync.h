@@ -8,6 +8,7 @@
  *   SensorSync sensorSync;
  *   sensorSync.setToken("ss_...");
  *   sensorSync.useHTTP("10.0.0.104", 8080);      // or/ou useMQTT("10.0.0.104", 1883)
+ *   // sensorSync.useTLS(CA_CERT);               // server with TLS / servidor com TLS (8443 / 8883)
  *   sensorSync.begin("ssid", "password");
  *   ...
  *   sensorSync.loop();                           // every loop() / em todo loop()
@@ -30,9 +31,11 @@
 #error "SensorSync supports only ESP8266 and ESP32 boards (suporta apenas ESP8266 e ESP32)."
 #endif
 
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include <time.h>
 
-#define SENSORSYNC_VERSION "1.0.0"
+#define SENSORSYNC_VERSION "1.1.0"
 
 // Maximum number of variables per send (the platform accepts up to 20 per project).
 // Quantidade maxima de variaveis por envio (a plataforma aceita ate 20 por projeto).
@@ -57,6 +60,23 @@ public:
 
     /** Broker user and password, if required. / Usuario e senha do broker, se exigidos. */
     void setMqttCredentials(const char* user, const char* password);
+
+    /**
+     * Encrypts the connection (HTTPS or MQTT over TLS) and only accepts a server signed by this CA
+     * (PEM, included in the generated code). Call it after useHTTP()/useMQTT(); the string must stay
+     * valid (use a global constant). Sketches that never call useTLS() do not link the TLS code.
+     * Criptografa a conexao e so aceita um servidor assinado por esta CA (PEM, vem no codigo gerado).
+     */
+    void useTLS(const char* caPem);
+
+    /** TLS enabled with useTLS(). / TLS ligado. */
+    bool tlsEnabled() const { return _secure != nullptr; }
+
+    /**
+     * Keeps the HTTP connection open between sends (default true). With TLS this avoids a new
+     * handshake on every send. / Mantem a conexao HTTP aberta entre envios (padrao true).
+     */
+    void setReuseConnection(bool reuse) { _reuse = reuse; }
 
     /**
      * Connects to Wi-Fi and waits up to setWifiTimeout() (default 15 s). Returns true if connected;
@@ -127,8 +147,23 @@ private:
     uint8_t _count;
 
     WiFiClient _mqttNet;
+    WiFiClient _httpNet;
     PubSubClient _mqtt;
+    HTTPClient _http;
+    bool _reuse;
     Stream* _debug;
+
+    // TLS: allocated only by useTLS(); the TLS-specific calls go through these pointers so that
+    // sketches without TLS do not pull BearSSL/mbedTLS into the firmware.
+    WiFiClient* _secure;
+    void* _trust;
+    bool _ntpStarted;
+    bool _mflnChecked;
+    bool (*_tlsPrepare)(SensorSync& self);
+    void (*_tlsError)(SensorSync& self, char* out, size_t size);
+    static bool tlsPrepareImpl(SensorSync& self);
+    static void tlsErrorImpl(SensorSync& self, char* out, size_t size);
+    void connectionError(const char* what);
 
     size_t buildJson(char* out, size_t size, bool includeToken);
     bool sendHttp(const char* json, size_t len);
